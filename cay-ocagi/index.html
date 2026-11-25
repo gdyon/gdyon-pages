@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#1b100e">
+  <link rel="icon" href="data:,">
+  <title>Çay Ocağı</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      display: grid;
+      place-items: center;
+      height: 100dvh;
+      background: #1b100e;
+      touch-action: none;
+      overscroll-behavior: none;
+      user-select: none;
+    }
+    main {
+      position: relative;
+      width: min(100vw, 56.25vh);
+      width: min(100vw, 56.25dvh);
+      aspect-ratio: 9 / 16;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    button {
+      position: absolute;
+      padding: 0;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: transparent;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:focus-visible { outline: 3px solid #fff4cd; outline-offset: -5px; }
+    .okuyucu {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <canvas aria-label="Çay Ocağı oyun alanı"></canvas>
+    <div id="dugmeler"></div>
+    <div id="durum" class="okuyucu" role="status"></div>
+  </main>
+  <script>
+    'use strict';
+
+    const RULES = {
+      width: 540,
+      height: 960,
+      orders: [
+        { text: 'Açık olsun', ratio: 0.25 },
+        { text: 'Tavşan kanı lütfen', ratio: 0.45 },
+        { text: 'Demli olsun', ratio: 0.65 }
+      ],
+      targetLevel: 0.85,
+      fillSeconds: 2.2,
+      speedIncrease: 0.06,
+      ratioTolerance: 0.25,
+      levelTolerance: 0.15,
+      ratioWeight: 0.5,
+      perfectScore: 90,
+      passScore: 60,
+      glassLimit: 10,
+      mistakeLimit: 3,
+      orderAnimationMs: 350,
+      orderWaitMs: 600,
+      resultMs: 1500,
+      recordedResultMs: 1200,
+      framesPerSecond: 30,
+      liquidColorStops: [
+        [0.00, [246, 236, 214, 0.18]],
+        [0.12, [230, 170, 70, 0.62]],
+        [0.25, [214, 122, 34, 0.80]],
+        [0.45, [170, 44, 22, 0.86]],
+        [0.65, [92, 20, 10, 0.93]],
+        [1.00, [40, 8, 4, 0.97]]
+      ],
+      recordingTypes: [
+        'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8', 'video/webm'
+      ]
+    };
+
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    const controls = document.querySelector('#dugmeler');
+    const status = document.querySelector('#durum');
+    const query = new URLSearchParams(location.search);
+    const clipCode = query.get('k');
+    const cream = '#fff0d3';
+    const gold = '#e9b876';
+    const glassTop = 424;
+    const glassBottom = 729;
+    const buttons = [];
+    const clips = [];
+    let state = 'baslangic';
+    let glassNo = 0;
+    let mistakes = 0;
+    let totalScore = 0;
+    let perfects = 0;
+    let order = RULES.orders[0];
+    let stage = 1;
+    let tea = 0;
+    let water = 0;
+    let level = 0;
+    let pour = null;
+    let result = null;
+    let lastResult = null;
+    let glassStartedAt = 0;
+    let resultAt = 0;
+    let recordingType = '';
+    let recordingStream = null;
+    let recording = null;
+    let pendingClips = [];
+    let audio = null;
+    let soundOn = true;
+    let droplets = [];
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function resizeBackingCanvas() {
+      const unit = Math.max(2, 2 * Math.round(30 * (window.devicePixelRatio || 1)));
+      canvas.width = unit * 9;
+      canvas.height = unit * 16;
+      ctx.setTransform(canvas.width / RULES.width, 0, 0, canvas.height / RULES.height, 0, 0);
+    }
+
+    function roundedRect(x, y, w, h, radius, fill, stroke) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
+    }
+
+    function ellipse(x, y, rx, ry, fill) {
+      ctx.beginPath();
+      ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+
+    function label(value, x, y, size, options = {}) {
+      const { color = cream, align = 'center', weight = 600, serif = false, maxWidth } = options;
+      ctx.fillStyle = color;
+      ctx.font = `${weight} ${size}px ${serif ? 'Georgia, serif' : 'system-ui, sans-serif'}`;
+      ctx.textAlign = align;
+      ctx.textBaseline = 'middle';
+      if (maxWidth) ctx.fillText(value, x, y, maxWidth);
+      else ctx.fillText(value, x, y);
+    }
+
+    function gradient(x, y, x2, y2, stops) {
+      const value = ctx.createLinearGradient(x, y, x2, y2);
+      for (const [at, color] of stops) value.addColorStop(at, color);
+      return value;
+    }
+
+    function backdrop() {
+      ctx.fillStyle = gradient(0, 0, 540, 960, [[0, '#2d1716'], [0.58, '#523024'], [1, '#291713']]);
+      ctx.fillRect(0, 0, 540, 960);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(44, 699);
+      ctx.lineTo(44, 308);
+      ctx.bezierCurveTo(44, 111, 496, 111, 496, 308);
+      ctx.lineTo(496, 699);
+      ctx.closePath();
+      ctx.fillStyle = gradient(0, 190, 0, 730, [[0, '#362021'], [1, '#673b29']]);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#82513a';
+      ctx.stroke();
+      ctx.clip();
+      const glow = ctx.createRadialGradient(270, 438, 14, 270, 438, 320);
+      glow.addColorStop(0, '#ce875c50');
+      glow.addColorStop(1, '#ce875c00');
+      ctx.fillStyle = glow;
+      ctx.fillRect(44, 147, 452, 554);
+      ctx.strokeStyle = '#e9b87619';
+      for (let row = 0; row < 4; row++) {
+        const y = 493 + row * 57;
+        ctx.beginPath();
+        ctx.moveTo(44, y);
+        ctx.lineTo(496, y);
+        for (let x = 44 + (row % 2) * 47; x < 496; x += 94) {
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + 57);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = gradient(0, 686, 0, 809, [[0, '#a75d39'], [0.3, '#774027'], [1, '#4a2922']]);
+      ctx.fillRect(0, 686, 540, 123);
+      ctx.fillStyle = '#d6905d65';
+      ctx.fillRect(0, 686, 540, 3);
+      ctx.fillStyle = '#2c1716';
+      ctx.fillRect(0, 805, 540, 155);
+      ctx.fillStyle = '#c47f5448';
+      ctx.fillRect(0, 806, 540, 2);
+    }
+
+    function customer(expression) {
+      const skin = ['#deb18b', '#ba805e', '#f0c6a4'][RULES.orders.indexOf(order)];
+      const shirt = ['#68756b', '#8a4741', '#605777'][RULES.orders.indexOf(order)];
+      ctx.save();
+      ctx.translate(131, 238);
+      roundedRect(-57, 30, 114, 66, 29, shirt);
+      roundedRect(-13, 28, 26, 34, 12, skin);
+      ellipse(-38, 5, 8, 12, skin);
+      ellipse(38, 5, 8, 12, skin);
+      ellipse(0, 0, 40, 44, skin);
+      ctx.beginPath();
+      ctx.moveTo(-39, 2);
+      ctx.bezierCurveTo(-52, -51, 25, -69, 39, -21);
+      ctx.quadraticCurveTo(43, -9, 39, 1);
+      ctx.quadraticCurveTo(25, -32, 7, -27);
+      ctx.quadraticCurveTo(-15, -13, -32, -14);
+      ctx.closePath();
+      ctx.fillStyle = '#2c1a19';
+      ctx.fill();
+      const surprised = expression === 'saskin';
+      const happy = expression === 'mutlu';
+      for (const x of [-14, 14]) {
+        ellipse(x, -1, surprised ? 3.6 : 2.9, surprised ? 5 : 3.4, '#341d17');
+        ellipse(x * 1.65, 12, 6, 3.5, '#b957503c');
+      }
+      ctx.strokeStyle = '#6f342b';
+      ctx.lineWidth = 2.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      if (surprised) ctx.ellipse(0, 19, 5, 6, 0, 0, Math.PI * 2);
+      else {
+        ctx.moveTo(-8, 17);
+        ctx.quadraticCurveTo(0, happy ? 29 : 20, 8, 17);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function orderBubble(now) {
+      const progress = Math.min(1, Math.max(0, (now - glassStartedAt) / RULES.orderAnimationMs));
+      const scale = reduceMotion ? 1 : 1 - 0.4 * (1 - progress) ** 3;
+      ctx.save();
+      ctx.translate(341, 244);
+      ctx.scale(scale, scale);
+      ctx.translate(-341, -244);
+      ctx.beginPath();
+      ctx.moveTo(214, 242);
+      ctx.lineTo(191, 259);
+      ctx.lineTo(218, 260);
+      ctx.fillStyle = '#f8e6cb';
+      ctx.fill();
+      roundedRect(209, 202, 265, 83, 22, '#f8e6cb');
+      label(order.text, 341, 244, 25, { color: '#49251e', maxWidth: 236 });
+      ctx.restore();
+    }
+
+    function hud() {
+      roundedRect(26, 29, 488, 92, 25, '#241415', '#754c3c');
+      const stats = [
+        ['Bardak', `${glassNo}/${RULES.glassLimit}`],
+        ['Hata', `${mistakes}/${RULES.mistakeLimit}`],
+        ['Puan', totalScore]
+      ];
+      stats.forEach(([name, value], i) => {
+        const x = 106 + i * 164;
+        label(name, x, 56, 16, { color: '#d9ad90' });
+        label(value, x, 91, 29, { weight: 750 });
+        if (i < stats.length - 1) {
+          ctx.fillStyle = '#744838';
+          ctx.fillRect(x + 82, 49, 1, 51);
+        }
+      });
+    }
+
+    function glassContour() {
+      ctx.beginPath();
+      ctx.moveTo(189, glassTop);
+      ctx.bezierCurveTo(187, 478, 235, 513, 226, 572);
+      ctx.bezierCurveTo(223, 621, 194, 657, 202, 702);
+      ctx.bezierCurveTo(209, glassBottom + 15, 331, glassBottom + 15, 338, 702);
+      ctx.bezierCurveTo(346, 657, 317, 621, 314, 572);
+      ctx.bezierCurveTo(305, 513, 353, 478, 351, glassTop);
+      ctx.closePath();
+    }
+
+    function liquidColor(ratio = level ? tea / level : 0, opacity = 1) {
+      const stops = RULES.liquidColorStops;
+      const boundedRatio = Math.max(0, Math.min(1, ratio));
+      const upperIndex = stops.findIndex(([at], i) => i > 0 && boundedRatio <= at);
+      const [lowerRatio, lowerColor] = stops[upperIndex - 1];
+      const [upperRatio, upperColor] = stops[upperIndex];
+      const fraction = (boundedRatio - lowerRatio) / (upperRatio - lowerRatio);
+      const [red, green, blue, alpha] = lowerColor.map((channel, i) =>
+        channel + (upperColor[i] - channel) * fraction
+      );
+      return `rgba(${Math.round(red)},${Math.round(green)},${Math.round(blue)},${alpha * opacity})`;
+    }
+
+    function glass(now) {
+      ellipse(270, 745, 167, 35, '#351b1790');
+      ellipse(270, 732, 164, 38, '#d5a37d');
+      ellipse(270, 725, 159, 34, '#f5dcaf');
+      ellipse(270, 728, 127, 23, '#bf7956');
+      ellipse(270, 724, 119, 21, '#eec391');
+      if (result?.tasti) {
+        ellipse(271, 730, 125, 20, liquidColor());
+        ellipse(374, 741, 24, 5, liquidColor());
+      }
+      glassContour();
+      ctx.fillStyle = '#fff1d621';
+      ctx.fill();
+      const mark = glassBottom - (glassBottom - glassTop) * RULES.targetLevel;
+      if (level > 0) {
+        const surface = glassBottom - (glassBottom - glassTop) * Math.min(1, level);
+        const wave = reduceMotion ? 0 : (pour ? 4 : 1.3) * Math.sin(now / 103);
+        ctx.save();
+        ctx.clip();
+        ctx.beginPath();
+        ctx.moveTo(180, surface);
+        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 365, surface);
+        ctx.lineTo(365, glassBottom + 20);
+        ctx.lineTo(180, glassBottom + 20);
+        ctx.closePath();
+        ctx.fillStyle = liquidColor();
+        ctx.fill();
+        ctx.save();
+        ctx.clip();
+        ctx.fillStyle = gradient(244, 0, 257, 0, [
+          [0, 'rgba(255,255,255,0)'], [0.4, 'rgba(255,255,255,0.13)'], [1, 'rgba(255,255,255,0)']
+        ]);
+        ctx.fillRect(244, surface - 4, 13, glassBottom - surface + 24);
+        ctx.restore();
+        ctx.beginPath();
+        ctx.moveTo(180, surface);
+        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 365, surface);
+        ctx.strokeStyle = 'rgba(255,235,198,0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+      glassContour();
+      ctx.strokeStyle = '#fff1d69c';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ellipse(270, glassTop, 81, 11, '#fff1d62b');
+      ctx.strokeStyle = '#fff1d6c8';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(206, 445);
+      ctx.bezierCurveTo(209, 477, 245, 515, 239, 567);
+      ctx.moveTo(235, 617);
+      ctx.quadraticCurveTo(207, 681, 219, 699);
+      ctx.strokeStyle = '#fff5dd91';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(200, mark);
+      ctx.lineTo(340, mark);
+      ctx.setLineDash([5, 6]);
+      ctx.strokeStyle = '#fff1c9';
+      ctx.lineWidth = 1.7;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineCap = 'butt';
+    }
+
+    function kettle(now) {
+      const spout = new Path2D('M45 52 Q21 48 7 33 L0 41 Q16 65 40 77 Z');
+      const teaPot = stage === 1;
+      const top = teaPot ? 39 : 23;
+      const metal = teaPot ? '#a84f38' : '#ad8c70';
+      ctx.save();
+      ctx.translate(266, 307);
+      ctx.strokeStyle = '#221514';
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.ellipse(130, 59, 25, 23, 0, -Math.PI / 2, Math.PI / 2);
+      ctx.stroke();
+      ctx.fillStyle = metal;
+      ctx.fill(spout);
+      roundedRect(36, top, 101, 95 - top, teaPot ? 26 : 18,
+        gradient(40, top, 120, 96, [[0, '#e7b48a'], [0.33, metal], [1, '#5b3029']]), '#f7c09375');
+      ellipse(85, top + 2, teaPot ? 31 : 38, 7, '#412927');
+      ellipse(85, top - 7, 8, 7, '#382322');
+      ctx.restore();
+      const flowBottom = Math.min(glassBottom, glassBottom - (glassBottom - glassTop) * level + 4);
+      const end = Math.max(glassTop, flowBottom);
+      const drift = reduceMotion ? 0 : Math.sin(now / 64) * 2;
+      ctx.beginPath();
+      ctx.moveTo(270, 346);
+      ctx.quadraticCurveTo(291 + drift, 403, 272, end);
+      ctx.strokeStyle = teaPot ? 'rgba(120,28,12,0.9)' : 'rgba(235,240,245,0.55)';
+      ctx.lineWidth = 7;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    function spill(now) {
+      const time = (now - resultAt) / 1000;
+      if (time < 0 || time > 0.9) return;
+      const color = liquidColor(undefined, 1 - time / 0.9);
+      for (const drop of droplets) {
+        const x = 270 + drop.dx * time;
+        const y = Math.min(743, glassTop + drop.dy * time + 650 * time * time);
+        ellipse(x, y, drop.size, drop.size * 1.35, color);
+      }
+    }
+
+    function registerButton(text, y, action, secondary = false) {
+      const button = document.createElement('button');
+      const box = { x: 46, y, w: 448, h: 88, button, secondary };
+      button.type = 'button';
+      button.textContent = text;
+      button.style.left = `${100 * box.x / RULES.width}%`;
+      button.style.top = `${100 * box.y / RULES.height}%`;
+      button.style.width = `${100 * box.w / RULES.width}%`;
+      button.style.height = `${100 * box.h / RULES.height}%`;
+      button.addEventListener('click', action);
+      controls.append(button);
+      buttons.push(box);
+      return button;
+    }
+
+    function clearButtons() {
+      controls.replaceChildren();
+      buttons.length = 0;
+    }
+
+    function drawButtons() {
+      for (const { x, y, w, h, button, secondary } of buttons) {
+        ctx.lineWidth = 1;
+        roundedRect(x, y, w, h, 16, secondary ? '#482922' : '#f2c687', secondary ? '#a77353' : '#ffe4b0');
+        label(button.textContent, x + w / 2, y + h / 2, 25,
+          { color: secondary ? cream : '#3a211d', weight: 750, maxWidth: w - 35 });
+      }
+    }
+
+    function front(now) {
+      ctx.save();
+      ctx.translate(89, -10);
+      ctx.scale(0.67, 0.67);
+      glass(now);
+      ctx.restore();
+      label('Çay Ocağı', 270, 179, 79, { serif: true, maxWidth: 457 });
+      label('Basılı tut: önce dem, sonra su.', 270, 546, 25, { weight: 500 });
+      label('Siparişe göre doldur, taşırma.', 270, 584, 25, { weight: 500 });
+    }
+
+    function gameplay(now) {
+      hud();
+      customer(result?.ifade);
+      orderBubble(now);
+      glass(now);
+      if (pour) kettle(now);
+      if (state === 'sonuc') {
+        if (result.tasti && !reduceMotion) spill(now);
+        roundedRect(46, 806, 448, 99, 22, '#3f231e', '#996249');
+        const color = result.hata ? '#ffd0ac' : cream;
+        label(result.metin, 270, 841, 39, { color, serif: true, maxWidth: 414 });
+        label(`+${result.puan} puan`, 270, 881, 21, { color: gold });
+      } else if (now - glassStartedAt < RULES.orderWaitMs) {
+        label('Sipariş geldi', 270, 872, 35, { serif: true });
+      } else {
+        label(stage === 1 ? 'Dem' : 'Sıcak su', 270, 850, 35, { serif: true });
+        label(pour ? (stage === 1 ? 'Suya geçmek için bırak' : 'Servis etmek için bırak')
+          : 'Dökmek için basılı tut', 270, 893, 22, { color: gold, weight: 500 });
+      }
+      label('Çay Ocağı', 518, 934, 16, { align: 'right', color: '#dfb992', serif: true });
+    }
+
+    function summary() {
+      label('Gün sonu', 270, 228, 66, { serif: true });
+      roundedRect(46, 306, 448, 158, 22, '#321c1a', '#a06a4a');
+      label('Toplam puan', 160, 352, 21, { color: gold });
+      label(totalScore, 160, 409, 48, { serif: true });
+      label('Mükemmel', 380, 352, 21, { color: gold });
+      label(perfects, 380, 409, 48, { serif: true });
+      ctx.fillStyle = '#a06a4a';
+      ctx.fillRect(269, 335, 1, 100);
+      const note = clips.length ? `Kayıt biçimi: ${recordingFormat()}`
+        : recordingType ? 'Bu gün kesit kaydedilemedi'
+          : 'Bu tarayıcı kesit kaydını desteklemiyor';
+      label(note, 270, 831, 19, { color: gold, maxWidth: 460 });
+      if (clipCode !== null) {
+        label(`Kesit kodu: ${clipCode}`, 270, 873, 18, { color: '#e0b99c', maxWidth: 460 });
+      }
+    }
+
+    function draw(now) {
+      backdrop();
+      if (state === 'baslangic') front(now);
+      else if (state === 'gunSonu') summary();
+      else gameplay(now);
+      drawButtons();
+    }
+
+    function unlockAudio() {
+      try {
+        if (!audio) {
+          const AudioEngine = window.AudioContext || window.webkitAudioContext;
+          if (!AudioEngine) return;
+          const context = new AudioEngine();
+          const master = context.createGain();
+          master.gain.value = soundOn ? 0.5 : 0;
+          master.connect(context.destination);
+          const noise = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
+          const samples = noise.getChannelData(0);
+          for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+          audio = { context, master, noise, stream: null };
+        }
+        if (audio.context.state !== 'running') audio.context.resume().catch(() => {});
+      } catch {
+        // Oyun ses aygıtı olmadan da devam eder.
+      }
+    }
+
+    function startPourSound() {
+      if (!audio) return;
+      const source = audio.context.createBufferSource();
+      const filter = audio.context.createBiquadFilter();
+      const volume = audio.context.createGain();
+      source.buffer = audio.noise;
+      source.loop = true;
+      filter.type = 'bandpass';
+      filter.frequency.value = stage === 1 ? 680 : 1070;
+      filter.Q.value = 0.7;
+      volume.gain.value = 0.31;
+      source.connect(filter).connect(volume).connect(audio.master);
+      source.onended = () => { source.disconnect(); filter.disconnect(); volume.disconnect(); };
+      source.start();
+      audio.stream = source;
+    }
+
+    function stopPourSound() {
+      if (!audio?.stream) return;
+      audio.stream.stop();
+      audio.stream = null;
+    }
+
+    function chime(overflow) {
+      if (!audio) return;
+      const { context, master } = audio;
+      const at = context.currentTime;
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      oscillator.type = overflow ? 'triangle' : 'sine';
+      oscillator.frequency.setValueAtTime(overflow ? 165 : 1320, at);
+      oscillator.frequency.exponentialRampToValueAtTime(overflow ? 65 : 1080, at + 0.23);
+      envelope.gain.setValueAtTime(0.001, at);
+      envelope.gain.exponentialRampToValueAtTime(overflow ? 0.29 : 0.19, at + 0.018);
+      envelope.gain.exponentialRampToValueAtTime(0.001, at + 0.31);
+      oscillator.connect(envelope).connect(master);
+      oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
+      oscillator.start(at);
+      oscillator.stop(at + 0.32);
+    }
+
+    function recordingFormat(type = recordingType) {
+      return type.split(';')[0].split('/')[1] || '';
+    }
+
+    function prepareRecording() {
+      recordingType = '';
+      if (!canvas.captureStream || typeof window.MediaRecorder?.isTypeSupported !== 'function') return;
+      recordingType = RULES.recordingTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+      if (!recordingType) return;
+      try {
+        recordingStream = canvas.captureStream(RULES.framesPerSecond);
+      } catch {
+        recordingType = '';
+      }
+    }
+
+    function recordGlass() {
+      if (!recordingStream) return;
+      try {
+        const recorder = new MediaRecorder(recordingStream, { mimeType: recordingType });
+        const clip = { recorder, result: null };
+        const chunks = [];
+        let failed = false;
+        const finished = new Promise(resolve => {
+          recorder.addEventListener('dataavailable', e => {
+            if (e.data.size) chunks.push(e.data);
+          });
+          recorder.addEventListener('error', () => { failed = true; resolve(); }, { once: true });
+          recorder.addEventListener('stop', () => {
+            if (!failed && chunks.length && clip.result) {
+              const type = chunks[0].type || recorder.mimeType || recordingType;
+              clips.push({ ...clip.result, blob: new Blob(chunks, { type }), format: recordingFormat(type) });
+            }
+            resolve();
+          }, { once: true });
+        });
+        recorder.start();
+        recording = clip;
+        pendingClips.push(finished);
+      } catch {
+        // Kayıt başlatılamazsa bardak oynanmaya devam eder.
+      }
+    }
+
+    function stopRecording() {
+      if (!recording) return;
+      const { recorder } = recording;
+      recording.result = result;
+      recording = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+    }
+
+    function download(clip, name) {
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(clip.blob);
+      link.href = url;
+      link.download = `cay-ocagi-${name}.${clip.format}`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+
+    function startDay() {
+      unlockAudio();
+      clips.length = 0;
+      pendingClips = [];
+      glassNo = 0;
+      mistakes = 0;
+      totalScore = 0;
+      perfects = 0;
+      lastResult = null;
+      clearButtons();
+      resizeBackingCanvas();
+      prepareRecording();
+      nextGlass(performance.now());
+    }
+
+    function nextGlass(now) {
+      state = 'oyun';
+      glassStartedAt = now;
+      glassNo++;
+      order = RULES.orders[(glassNo - 1) % RULES.orders.length];
+      stage = 1;
+      tea = 0;
+      water = 0;
+      level = 0;
+      result = null;
+      status.textContent = `Bardak ${glassNo}. ${order.text}. Dem dök.`;
+      draw(now);
+      recordGlass();
+    }
+
+    async function endDay() {
+      await Promise.all(pendingClips);
+      recordingStream?.getTracks().forEach(track => track.stop());
+      recordingStream = null;
+      state = 'gunSonu';
+      status.textContent = `Gün sonu. Toplam puan ${totalScore}. Mükemmel bardak ${perfects}.`;
+      registerButton('Yeniden oyna', 496, startDay);
+      if (clips.length) {
+        const ordered = [...clips].sort((a, b) => a.bardak - b.bardak);
+        const best = ordered.reduce((a, b) => b.puan > a.puan ? b : a);
+        const worst = ordered.find(clip => clip.tasti) || ordered.reduce((a, b) => b.puan < a.puan ? b : a);
+        registerButton('En iyi bardağı indir', 602, () => download(best, 'iyi'), true);
+        registerButton('En kötü bardağı indir', 707, () => download(worst, 'kotu'), true);
+      }
+    }
+
+    function beginPour(input, now, until = Infinity) {
+      if (state !== 'oyun' || pour || now - glassStartedAt < RULES.orderWaitMs) return false;
+      pour = { input, time: now, until };
+      startPourSound();
+      return true;
+    }
+
+    function addLiquid(now) {
+      if (!pour) return;
+      const speed = (1 + RULES.speedIncrease) ** (glassNo - 1) / RULES.fillSeconds;
+      const end = Math.max(pour.time, Math.min(now, pour.until));
+      const amount = speed * (end - pour.time) / 1000;
+      pour.time = end;
+      if (stage === 1) tea += amount;
+      else water += amount;
+      level = tea + water;
+      if (level - 1 > Number.EPSILON * 16) {
+        const overflowRatio = tea / level;
+        tea = overflowRatio;
+        water = 1 - overflowRatio;
+        level = 1;
+        finishGlass(now, true);
+      }
+    }
+
+    function releasePour(input, now, serve = true) {
+      if (pour?.input !== input) return;
+      addLiquid(now);
+      if (!pour) return;
+      pour = null;
+      stopPourSound();
+      if (!serve) return;
+      if (stage === 1) {
+        if (tea > 0) {
+          stage = 2;
+          status.textContent = 'Sıcak su dök.';
+        }
+      } else {
+        finishGlass(now, false);
+      }
+    }
+
+    function finishGlass(now, overflow) {
+      stopPourSound();
+      pour = null;
+      const ratio = level ? tea / level : 0;
+      const r = Math.max(0, 1 - Math.abs(ratio - order.ratio) / RULES.ratioTolerance);
+      const l = Math.max(0, 1 - Math.abs(level - RULES.targetLevel) / RULES.levelTolerance);
+      const score = overflow ? 0 : Math.round(100 * (RULES.ratioWeight * r + (1 - RULES.ratioWeight) * l));
+      const perfect = score >= RULES.perfectScore;
+      const fail = score < RULES.passScore;
+      const text = overflow ? 'Taştı!' : perfect ? 'Eline sağlık!' : fail ? 'Bu çay mı?' : 'İdare eder.';
+      result = {
+        metin: text, puan: score, tasti: overflow, hata: fail, bardak: glassNo,
+        ifade: perfect ? 'mutlu' : fail ? 'saskin' : 'bekliyor'
+      };
+      lastResult = result;
+      if (perfect) perfects++;
+      if (fail) mistakes++;
+      totalScore += score;
+      if (overflow || perfect) chime(overflow);
+      if (overflow) {
+        droplets = Array.from({ length: 22 }, () => ({
+          dx: (Math.random() - 0.5) * 465,
+          dy: -40 - Math.random() * 245,
+          size: 2 + Math.random() * 4.5
+        }));
+      }
+      state = 'sonuc';
+      resultAt = now;
+      status.textContent = `${text} ${score} puan.`;
+    }
+
+    let endingDay = false;
+    function frame(now) {
+      if (state === 'oyun') addLiquid(now);
+      else if (state === 'sonuc') {
+        const elapsed = now - resultAt;
+        if (elapsed >= RULES.recordedResultMs) stopRecording();
+        if (elapsed >= RULES.resultMs && !endingDay) {
+          if (glassNo >= RULES.glassLimit || mistakes >= RULES.mistakeLimit) {
+            endingDay = true;
+            endDay().finally(() => { endingDay = false; });
+          } else {
+            nextGlass(now);
+          }
+        }
+      }
+      draw(now);
+      requestAnimationFrame(frame);
+    }
+
+    canvas.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || state !== 'oyun') return;
+      e.preventDefault();
+      unlockAudio();
+      if (beginPour(e.pointerId, performance.now())) canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointerup', e => releasePour(e.pointerId, performance.now()));
+    for (const event of ['pointercancel', 'lostpointercapture']) {
+      canvas.addEventListener(event, e => releasePour(e.pointerId, performance.now(), false));
+    }
+    window.addEventListener('keydown', e => {
+      if (e.code !== 'Space' || state !== 'oyun') return;
+      e.preventDefault();
+      if (e.repeat) return;
+      unlockAudio();
+      beginPour('space', performance.now());
+    });
+    window.addEventListener('keyup', e => {
+      if (e.code === 'Space' && pour?.input === 'space') {
+        e.preventDefault();
+        releasePour('space', performance.now());
+      }
+    });
+    window.addEventListener('blur', () => {
+      if (pour) releasePour(pour.input, performance.now(), false);
+    });
+    window.addEventListener('resize', () => {
+      if (state === 'baslangic' || state === 'gunSonu') resizeBackingCanvas();
+    });
+
+    if (query.get('test') === '1') {
+      window.__cay = {
+        get state() { return state; },
+        get bardak() { return glassNo; },
+        get hata() { return mistakes; },
+        get puan() { return totalScore; },
+        get sonSonuc() { return lastResult && { ...lastResult }; },
+        get kayitBicimi() { return recordingFormat(); },
+        get kesitSayisi() { return clips.length; },
+        async otomatik(demMs, suMs) {
+          if (![demMs, suMs].every(ms => Number.isFinite(ms) && ms >= 0)) return false;
+          if (state !== 'oyun' || pour) return false;
+          const currentGlass = glassNo;
+          const readyAt = glassStartedAt + RULES.orderWaitMs;
+          while (performance.now() < readyAt) {
+            await new Promise(resolve => setTimeout(resolve, Math.ceil(readyAt - performance.now())));
+          }
+          if (state !== 'oyun' || glassNo !== currentGlass || pour) return false;
+          const input = Symbol();
+          const hold = async ms => {
+            const now = performance.now();
+            if (!beginPour(input, now, now + ms)) return;
+            await new Promise(resolve => setTimeout(resolve, ms));
+            releasePour(input, performance.now());
+          };
+          if (stage === 1) {
+            if (demMs === 0 && tea === 0) return false;
+            await hold(demMs);
+          }
+          if (state === 'oyun' && glassNo === currentGlass && stage === 2 && !pour) await hold(suMs);
+          return glassNo === currentGlass && state === 'sonuc';
+        }
+      };
+    }
+
+    registerButton('Başla', 665, startDay);
+    const soundButton = registerButton('Ses açık', 770, () => {
+      soundOn = !soundOn;
+      unlockAudio();
+      if (audio) audio.master.gain.value = soundOn ? 0.5 : 0;
+      soundButton.textContent = soundOn ? 'Ses açık' : 'Ses kapalı';
+      soundButton.setAttribute('aria-pressed', String(soundOn));
+    }, true);
+    soundButton.setAttribute('aria-pressed', 'true');
+    resizeBackingCanvas();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
