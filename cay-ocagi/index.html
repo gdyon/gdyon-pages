@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#1b100e">
   <link rel="icon" href="data:,">
   <title>Çay Ocağı</title>
+  <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
@@ -13,9 +14,13 @@
       display: grid;
       place-items: center;
       height: 100dvh;
-      background: #1b100e;
+      background:
+        radial-gradient(ellipse at 50% 38%, #9e735b25, #140b0b75 80%),
+        repeating-linear-gradient(90deg, #221414 0 2px, transparent 2px 119px),
+        repeating-linear-gradient(89deg, #3d2720 0 3px, #39231e 4px 7px, #402820 8px 12px);
       touch-action: none;
       overscroll-behavior: none;
+      -webkit-user-select: none;
       user-select: none;
     }
     main {
@@ -36,6 +41,7 @@
       -webkit-tap-highlight-color: transparent;
     }
     button:focus-visible { outline: 3px solid #fff4cd; outline-offset: -5px; }
+    button:disabled { cursor: default; }
     .okuyucu {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
       clip-path: inset(50%); white-space: nowrap;
@@ -54,10 +60,15 @@
     const RULES = {
       width: 540,
       height: 960,
+      teaRatios: { light: 0.25, ruby: 0.45, strong: 0.65, brew: 1 },
       orders: [
-        { text: 'Açık olsun', ratio: 0.25 },
-        { text: 'Tavşan kanı lütfen', ratio: 0.45 },
-        { text: 'Demli olsun', ratio: 0.65 }
+        { id: 'light', tea: 'light' },
+        { id: 'ruby', tea: 'ruby' },
+        { id: 'strong', tea: 'strong' },
+        { id: 'brew', tea: 'brew' },
+        { id: 'mug', tea: 'ruby', fillScale: 0.72, target: 0.88 },
+        { id: 'hurry', tea: 'light', deadlineMs: 5500 },
+        { id: 'brim', tea: 'ruby', target: 0.95 }
       ],
       targetLevel: 0.85,
       fillSeconds: 2.2,
@@ -65,14 +76,14 @@
       ratioTolerance: 0.25,
       levelTolerance: 0.15,
       ratioWeight: 0.5,
-      perfectScore: 90,
-      passScore: 60,
+      scoreTiers: { perfect: 95, veryGood: 80, good: 60 },
       glassLimit: 10,
       mistakeLimit: 3,
       orderAnimationMs: 350,
       orderWaitMs: 600,
       resultMs: 1500,
-      recordedResultMs: 1200,
+      recordingTitleMs: 2500,
+      happytimePerfects: 8,
       framesPerSecond: 30,
       liquidColorStops: [
         [0.00, [246, 236, 214, 0.18]],
@@ -88,6 +99,57 @@
       ]
     };
 
+    const WORDS = {
+      tr: {
+        name: 'Çay Ocağı', subtitle: '', area: 'Çay Ocağı oyun alanı', start: 'Başla',
+        help: 'Nasıl oynanır?', back: 'Geri', menu: 'Ana menü', pause: 'Duraklat', paused: 'Duraklatıldı',
+        resume: 'Devam', soundOn: 'Ses: açık', soundOff: 'Ses: kapalı',
+        day: n => `Gün ${n}`, glass: 'Bardak', mistakes: 'Hata', points: 'Puan',
+        brew: 'Dem', water: 'Sıcak su', hold: 'Basılı tut', release: 'Bırak',
+        guide: ['İlk tutuşta dem dök, bırak.', 'İkinci tutuşta sıcak su ekle.', 'Çizgiye yaklaşınca bırak ve servis et.'],
+        good: 'İyi', veryGood: 'Çok iyi', perfect: 'Tam kıvamında!', bad: 'Bu çay mı?',
+        spilled: 'Taştı!', late: 'Süre doldu!', color: 'Renk', fill: 'Doluluk',
+        end: 'Gün sonu', total: 'Toplam puan', perfectCount: 'Tam kıvamında', replay: 'Yeniden oyna',
+        best: 'En iyi bardağı indir', worst: 'En kötü bardağı indir',
+        noClips: 'Bu gün kesit kaydedilemedi.', unsupported: 'Kesit kaydı desteklenmiyor.',
+        format: format => `Kesit biçimi: ${format}`, code: code => `Kesit kodu: ${code}`,
+        lines: ['Her zamankinden.', 'Eline sağlık şimdiden.', 'Kolay gelsin.', 'Bir çay alayım.', 'Afiyetle içerim.'],
+        orders: {
+          light: ['Açık olsun', 'Açık çay istedi.'],
+          ruby: ['Tavşan kanı', 'Tavşan kanı istedi.'],
+          strong: ['Demli olsun', 'Demli istedi.'],
+          brew: ['Sadece dem', 'Sadece dem istedi.'],
+          mug: ['Büyük kupa,\ntavşan kanı', 'Büyük kupada tavşan kanı istedi.', 'Daha yavaş dolar.'],
+          hurry: ['Acelem var,\naçık olsun', 'Acelesi var, açık çay istedi.', 'Süre dolmadan servis et.'],
+          brim: ['Ağzına kadar\ntavşan kanı', 'Ağzına kadar tavşan kanı istedi.', 'Çizgi ağza yakın.']
+        }
+      },
+      en: {
+        name: 'Çay Ocağı', subtitle: 'Turkish Tea House', area: 'Çay Ocağı game area', start: 'Play',
+        help: 'How to play', back: 'Back', menu: 'Main menu', pause: 'Pause', paused: 'Paused',
+        resume: 'Resume', soundOn: 'Sound: on', soundOff: 'Sound: off',
+        day: n => `Day ${n}`, glass: 'Cup', mistakes: 'Mistakes', points: 'Score',
+        brew: 'Brew', water: 'Hot water', hold: 'Hold', release: 'Let go',
+        guide: ['Hold to pour the brew, then let go.', 'Hold again to add hot water.', 'Let go at the line to serve.'],
+        good: 'Good', veryGood: 'Very good', perfect: 'Just right!', bad: 'Is this tea?',
+        spilled: 'Spilled!', late: 'Time’s up!', color: 'Color', fill: 'Fill',
+        end: 'Day over', total: 'Total score', perfectCount: 'Just right', replay: 'Play again',
+        best: 'Download best cup', worst: 'Download worst cup',
+        noClips: 'No clips were recorded today.', unsupported: 'Clip recording is unavailable.',
+        format: format => `Clip format: ${format}`, code: code => `Clip code: ${code}`,
+        lines: ['The usual, please.', 'Thanks in advance.', 'Hope your shift goes well.', 'I’ll have a tea.', 'Looking forward to it.'],
+        orders: {
+          light: ['Light tea', 'They asked for light tea.'],
+          ruby: ["Rabbit's blood\n(ruby red)", 'They asked for ruby-red tea.'],
+          strong: ['Strong tea', 'They asked for strong tea.'],
+          brew: ['Just the brew', 'They asked for just the brew.'],
+          mug: ['Big mug,\nruby-red tea', 'Ruby-red tea in a big mug.', 'The mug fills more slowly.'],
+          hurry: ['In a hurry —\nlight tea', 'They want light tea, fast.', 'Serve before time runs out.'],
+          brim: ['Ruby-red tea\nto the brim', 'Ruby-red tea, filled to the brim.', 'The line is near the rim.']
+        }
+      }
+    };
+
     const canvas = document.querySelector('canvas');
     const ctx = canvas.getContext('2d');
     const controls = document.querySelector('#dugmeler');
@@ -99,8 +161,21 @@
     const glassTop = 424;
     const glassBottom = 729;
     const buttons = [];
-    const clips = [];
-    let state = 'baslangic';
+    let words = WORDS.tr;
+    let state = 'loading';
+    let day = 0;
+    let session = null;
+    let pausedFrom = null;
+    let pausedAt = 0;
+    let pausedMs = 0;
+    let adPending = false;
+    let adPlaying = false;
+    let sdkMuted = false;
+    let dayOrders = [];
+    let customerIndex = 0;
+    let dayCustomers = [];
+    const seenOrders = new Set();
+    let firstOrder = false;
     let glassNo = 0;
     let mistakes = 0;
     let totalScore = 0;
@@ -114,15 +189,22 @@
     let result = null;
     let lastResult = null;
     let glassStartedAt = 0;
+    let titleStartedAt = 0;
+    let firstPour = false;
     let resultAt = 0;
     let recordingType = '';
-    let recordingStream = null;
     let recording = null;
-    let pendingClips = [];
+    let cupFrames = 0;
     let audio = null;
     let soundOn = true;
     let droplets = [];
     const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const clamp = value => Math.min(1, Math.max(0, value));
+    const clock = () => (pausedFrom ? pausedAt : performance.now()) - pausedMs;
+    const targetLevel = () => order.target ?? RULES.targetLevel;
+    const targetRatio = () => RULES.teaRatios[order.tea];
+    const orderText = () => words.orders[order.id][0].replace('\n', ' ');
+    const tutorial = () => day === 1 && glassNo <= 3;
 
     function resizeBackingCanvas() {
       const unit = Math.max(2, 2 * Math.round(30 * (window.devicePixelRatio || 1)));
@@ -205,11 +287,18 @@
       ctx.fillRect(0, 806, 540, 2);
     }
 
+    const customers = [
+      ['#deb18b', '#68756b', '#39231e', 'glasses'],
+      ['#ba805e', '#8a4741', '#30201a', 'cap'],
+      ['#f0c6a4', '#605777', '#7c3f2c', 'bun'],
+      ['#cc9576', '#3e6f73', '#b19b84', 'moustache'],
+      ['#a86d50', '#a76d43', '#2e231f', 'earrings']
+    ];
+
     function customer(expression) {
-      const skin = ['#deb18b', '#ba805e', '#f0c6a4'][RULES.orders.indexOf(order)];
-      const shirt = ['#68756b', '#8a4741', '#605777'][RULES.orders.indexOf(order)];
+      const [skin, shirt, hair, detail] = customers[customerIndex];
       ctx.save();
-      ctx.translate(131, 238);
+      ctx.translate(99, 239);
       roundedRect(-57, 30, 114, 66, 29, shirt);
       roundedRect(-13, 28, 26, 34, 12, skin);
       ellipse(-38, 5, 8, 12, skin);
@@ -222,13 +311,29 @@
       ctx.quadraticCurveTo(25, -32, 7, -27);
       ctx.quadraticCurveTo(-15, -13, -32, -14);
       ctx.closePath();
-      ctx.fillStyle = '#2c1a19';
+      ctx.fillStyle = hair;
       ctx.fill();
+      if (detail === 'bun') ellipse(33, -29, 17, 23, hair);
+      if (detail === 'cap') {
+        ellipse(0, -32, 42, 19, shirt);
+        ellipse(11, -20, 38, 5, '#472825');
+      }
       const surprised = expression === 'saskin';
       const happy = expression === 'mutlu';
       for (const x of [-14, 14]) {
         ellipse(x, -1, surprised ? 3.6 : 2.9, surprised ? 5 : 3.4, '#341d17');
         ellipse(x * 1.65, 12, 6, 3.5, '#b957503c');
+      }
+      if (detail === 'glasses') {
+        ctx.lineWidth = 2.5;
+        roundedRect(-27, -9, 24, 17, 5, null, '#38251d');
+        roundedRect(3, -9, 24, 17, 5, null, '#38251d');
+        roundedRect(-4, -3, 8, 2, 0, '#38251d');
+      }
+      if (detail === 'moustache') ellipse(0, 12, 13, 3, hair);
+      if (detail === 'earrings') {
+        ellipse(-39, 15, 4, 6, gold);
+        ellipse(39, 15, 4, 6, gold);
       }
       ctx.strokeStyle = '#6f342b';
       ctx.lineWidth = 2.6;
@@ -244,43 +349,60 @@
     }
 
     function orderBubble(now) {
-      const progress = Math.min(1, Math.max(0, (now - glassStartedAt) / RULES.orderAnimationMs));
-      const scale = reduceMotion ? 1 : 1 - 0.4 * (1 - progress) ** 3;
+      const age = now - glassStartedAt;
+      const progress = clamp(age / RULES.orderAnimationMs);
+      const [text, , explanation] = words.orders[order.id];
+      const lines = text.split('\n');
+      const showColor = day === 1 || firstOrder;
+      const description = tutorial() ? '' : (firstOrder && explanation ? explanation : words.lines[customerIndex]);
+      const titleY = (description ? 227 : 242) - (lines.length - 1) * 17;
       ctx.save();
-      ctx.translate(341, 244);
-      ctx.scale(scale, scale);
-      ctx.translate(-341, -244);
+      if (!reduceMotion) ctx.translate(0, 9 * (1 - progress) ** 3);
       ctx.beginPath();
-      ctx.moveTo(214, 242);
-      ctx.lineTo(191, 259);
-      ctx.lineTo(218, 260);
+      ctx.moveTo(178, 230);
+      ctx.lineTo(151, 245);
+      ctx.lineTo(178, 251);
       ctx.fillStyle = '#f8e6cb';
       ctx.fill();
-      roundedRect(209, 202, 265, 83, 22, '#f8e6cb');
-      label(order.text, 341, 244, 25, { color: '#49251e', maxWidth: 236 });
+      roundedRect(171, 181, 344, 124, 21, '#f8e6cb');
+      lines.forEach((line, i) => label(line, showColor ? 360 : 343, titleY + i * 34, 34,
+        { color: '#49251e', maxWidth: showColor ? 286 : 322, weight: 750 }));
+      if (showColor) {
+        const swatchY = titleY + (lines.length - 1) * 17;
+        ellipse(197, swatchY, 13, 13, '#c49d7f');
+        ellipse(197, swatchY, 11, 11, liquidColor(targetRatio()));
+      }
+      if (description) label(description, 343, 280, 27, { color: '#613c2c', maxWidth: 322 });
       ctx.restore();
+      if (order.deadlineMs) {
+        const time = result ? resultAt : now;
+        const remaining = clamp(1 - (time - glassStartedAt - RULES.orderWaitMs) / order.deadlineMs);
+        roundedRect(175, 319, 336, 11, 5, '#301a18');
+        if (remaining) roundedRect(175, 319, 336 * remaining, 11, 5, remaining > 0.25 ? gold : '#ff7e67');
+      }
     }
 
     function hud() {
-      roundedRect(26, 29, 488, 92, 25, '#241415', '#754c3c');
+      roundedRect(91, 20, 424, 70, 15, '#241415', '#754c3c');
+      label(words.day(day), 151, 55, 25, { weight: 750, maxWidth: 106 });
       const stats = [
-        ['Bardak', `${glassNo}/${RULES.glassLimit}`],
-        ['Hata', `${mistakes}/${RULES.mistakeLimit}`],
-        ['Puan', totalScore]
+        [words.glass, `${glassNo}/${RULES.glassLimit}`],
+        [words.mistakes, `${mistakes}/${RULES.mistakeLimit}`],
+        [words.points, totalScore]
       ];
       stats.forEach(([name, value], i) => {
-        const x = 106 + i * 164;
-        label(name, x, 56, 16, { color: '#d9ad90' });
-        label(value, x, 91, 29, { weight: 750 });
-        if (i < stats.length - 1) {
-          ctx.fillStyle = '#744838';
-          ctx.fillRect(x + 82, 49, 1, 51);
-        }
+        const x = 258 + i * 101;
+        label(name, x, 38, 24, { color: '#f1cbb0' });
+        label(value, x, 67, 28, { weight: 750 });
       });
     }
 
     function glassContour() {
       ctx.beginPath();
+      if (order.id === 'mug') {
+        ctx.roundRect(148, glassTop, 244, glassBottom - glassTop, [9, 9, 30, 30]);
+        return;
+      }
       ctx.moveTo(189, glassTop);
       ctx.bezierCurveTo(187, 478, 235, 513, 226, 572);
       ctx.bezierCurveTo(223, 621, 194, 657, 202, 702);
@@ -303,7 +425,7 @@
       return `rgba(${Math.round(red)},${Math.round(green)},${Math.round(blue)},${alpha * opacity})`;
     }
 
-    function glass(now) {
+    function glass(now, fill = level, ratio = level ? tea / level : 0) {
       ellipse(270, 745, 167, 35, '#351b1790');
       ellipse(270, 732, 164, 38, '#d5a37d');
       ellipse(270, 725, 159, 34, '#f5dcaf');
@@ -313,22 +435,30 @@
         ellipse(271, 730, 125, 20, liquidColor());
         ellipse(374, 741, 24, 5, liquidColor());
       }
+      const mug = order.id === 'mug';
+      if (mug) {
+        ctx.beginPath();
+        ctx.arc(390, 520, 50, -Math.PI / 2, Math.PI / 2);
+        ctx.strokeStyle = '#fff1d682';
+        ctx.lineWidth = 13;
+        ctx.stroke();
+      }
       glassContour();
       ctx.fillStyle = '#fff1d621';
       ctx.fill();
-      const mark = glassBottom - (glassBottom - glassTop) * RULES.targetLevel;
-      if (level > 0) {
-        const surface = glassBottom - (glassBottom - glassTop) * Math.min(1, level);
+      const mark = glassBottom - (glassBottom - glassTop) * targetLevel();
+      if (fill > 0) {
+        const surface = glassBottom - (glassBottom - glassTop) * clamp(fill);
         const wave = reduceMotion ? 0 : (pour ? 4 : 1.3) * Math.sin(now / 103);
         ctx.save();
         ctx.clip();
         ctx.beginPath();
-        ctx.moveTo(180, surface);
-        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 365, surface);
-        ctx.lineTo(365, glassBottom + 20);
-        ctx.lineTo(180, glassBottom + 20);
+        ctx.moveTo(144, surface);
+        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 396, surface);
+        ctx.lineTo(396, glassBottom + 20);
+        ctx.lineTo(144, glassBottom + 20);
         ctx.closePath();
-        ctx.fillStyle = liquidColor();
+        ctx.fillStyle = liquidColor(ratio);
         ctx.fill();
         ctx.save();
         ctx.clip();
@@ -338,8 +468,8 @@
         ctx.fillRect(244, surface - 4, 13, glassBottom - surface + 24);
         ctx.restore();
         ctx.beginPath();
-        ctx.moveTo(180, surface);
-        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 365, surface);
+        ctx.moveTo(144, surface);
+        ctx.bezierCurveTo(229, surface + wave, 285, surface - wave, 396, surface);
         ctx.strokeStyle = 'rgba(255,235,198,0.45)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
@@ -349,26 +479,36 @@
       ctx.strokeStyle = '#fff1d69c';
       ctx.lineWidth = 3;
       ctx.stroke();
-      ellipse(270, glassTop, 81, 11, '#fff1d62b');
+      ellipse(270, glassTop, mug ? 122 : 81, 11, '#fff1d62b');
       ctx.strokeStyle = '#fff1d6c8';
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(206, 445);
-      ctx.bezierCurveTo(209, 477, 245, 515, 239, 567);
-      ctx.moveTo(235, 617);
-      ctx.quadraticCurveTo(207, 681, 219, 699);
+      if (mug) {
+        ctx.moveTo(167, 446);
+        ctx.lineTo(167, 680);
+      } else {
+        ctx.moveTo(206, 445);
+        ctx.bezierCurveTo(209, 477, 245, 515, 239, 567);
+        ctx.moveTo(235, 617);
+        ctx.quadraticCurveTo(207, 681, 219, 699);
+      }
       ctx.strokeStyle = '#fff5dd91';
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(200, mark);
-      ctx.lineTo(340, mark);
-      ctx.setLineDash([5, 6]);
-      ctx.strokeStyle = '#fff1c9';
-      ctx.lineWidth = 1.7;
-      ctx.stroke();
+      if (state !== 'baslangic' && state !== 'loading' && state !== 'help') {
+        const width = mug ? 228 : 148;
+        const accent = mug ? '#95e1d1' : '#fff0b3';
+        if (tutorial()) roundedRect(270 - width / 2, mark - 10, width, 20, 5, '#f8c96a45');
+        ctx.beginPath();
+        ctx.moveTo(270 - width / 2, mark);
+        ctx.lineTo(270 + width / 2, mark);
+        ctx.setLineDash(mug ? [13, 7] : [7, 6]);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = tutorial() ? 4 : 3;
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
       ctx.lineCap = 'butt';
     }
@@ -417,18 +557,22 @@
       }
     }
 
-    function registerButton(text, y, action, secondary = false) {
+    function registerButton(text, y, action, { x = 46, w = 448, h = 78, secondary = false, icon = false } = {}) {
       const button = document.createElement('button');
-      const box = { x: 46, y, w: 448, h: 88, button, secondary };
       button.type = 'button';
       button.textContent = text;
-      button.style.left = `${100 * box.x / RULES.width}%`;
-      button.style.top = `${100 * box.y / RULES.height}%`;
-      button.style.width = `${100 * box.w / RULES.width}%`;
-      button.style.height = `${100 * box.h / RULES.height}%`;
-      button.addEventListener('click', action);
+      button.style.left = `${100 * x / RULES.width}%`;
+      button.style.top = `${100 * y / RULES.height}%`;
+      button.style.width = `${100 * w / RULES.width}%`;
+      button.style.height = `${100 * h / RULES.height}%`;
+      button.addEventListener('click', () => {
+        if (adPending || button.disabled) return;
+        unlockAudio();
+        action();
+      });
+      if (icon) button.title = text;
       controls.append(button);
-      buttons.push(box);
+      buttons.push({ x, y, w, h, button, secondary, icon });
       return button;
     }
 
@@ -438,71 +582,172 @@
     }
 
     function drawButtons() {
-      for (const { x, y, w, h, button, secondary } of buttons) {
+      for (const { x, y, w, h, button, secondary, icon } of buttons) {
+        ctx.globalAlpha = button.disabled ? 0.45 : 1;
         ctx.lineWidth = 1;
-        roundedRect(x, y, w, h, 16, secondary ? '#482922' : '#f2c687', secondary ? '#a77353' : '#ffe4b0');
-        label(button.textContent, x + w / 2, y + h / 2, 25,
-          { color: secondary ? cream : '#3a211d', weight: 750, maxWidth: w - 35 });
+        roundedRect(x, y, w, h, 15, secondary ? '#482922' : '#f2c687', secondary ? '#a77353' : '#ffe4b0');
+        if (icon) {
+          roundedRect(x + 17, y + 19, 7, h - 38, 2, cream);
+          roundedRect(x + 31, y + 19, 7, h - 38, 2, cream);
+        } else {
+          label(button.textContent, x + w / 2, y + h / 2, 28,
+            { color: secondary ? cream : '#3a211d', weight: 750, maxWidth: w - 28 });
+        }
       }
+      ctx.globalAlpha = 1;
     }
 
-    function front(now) {
+    function menuArt() {
       ctx.save();
-      ctx.translate(89, -10);
-      ctx.scale(0.67, 0.67);
-      glass(now);
+      ctx.translate(76, 29);
+      ctx.scale(0.72, 0.72);
+      glass(clock(), 0.73, 0.45);
       ctx.restore();
-      label('Çay Ocağı', 270, 179, 79, { serif: true, maxWidth: 457 });
-      label('Basılı tut: önce dem, sonra su.', 270, 546, 25, { weight: 500 });
-      label('Siparişe göre doldur, taşırma.', 270, 584, 25, { weight: 500 });
+    }
+
+    function front() {
+      label(words.name, 270, 176, 79, { serif: true, maxWidth: 460 });
+      if (words.subtitle) label(words.subtitle, 270, 242, 28, { color: gold });
+      menuArt();
+    }
+
+    function help() {
+      label(words.help, 270, 195, 58, { serif: true, maxWidth: 475 });
+      roundedRect(28, 290, 484, 263, 24, '#321c1a', '#a06a4a');
+      words.guide.forEach((line, i) => label(line, 270, 351 + i * 70, 29, { maxWidth: 453 }));
+    }
+
+    function finger(now) {
+      ctx.save();
+      ctx.globalAlpha = reduceMotion ? 1 : 0.76 + 0.24 * Math.cos(now / 145);
+      ctx.translate(423, 650);
+      ctx.beginPath();
+      ctx.moveTo(-12, 44);
+      ctx.bezierCurveTo(-15, 36, -41, 14, -29, 6);
+      ctx.quadraticCurveTo(-23, 1, -12, 14);
+      ctx.lineTo(-12, -30);
+      ctx.bezierCurveTo(-12, -48, 7, -48, 7, -30);
+      ctx.lineTo(7, -3);
+      ctx.bezierCurveTo(11, -13, 23, -10, 24, 2);
+      ctx.bezierCurveTo(32, -6, 44, 1, 43, 12);
+      ctx.quadraticCurveTo(49, 28, 32, 44);
+      ctx.closePath();
+      ctx.fillStyle = cream;
+      ctx.strokeStyle = '#4a2820';
+      ctx.lineWidth = 4;
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(-2, -29, 28, Math.PI * 1.03, Math.PI * 1.97);
+      ctx.strokeStyle = gold;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function sparkle(now) {
+      const life = clamp((now - resultAt) / 820);
+      if (life >= 1) return;
+      ctx.save();
+      ctx.globalAlpha = 1 - life;
+      for (const [x, y, size] of [[369, 413, 13], [163, 454, 8], [402, 439, 6]]) {
+        ctx.beginPath();
+        const height = y - 9 * life;
+        for (let i = 0; i < 8; i++) {
+          const angle = i * Math.PI / 4;
+          const radius = i % 2 ? size / 3 : size;
+          ctx.lineTo(x + radius * Math.cos(angle), height + radius * Math.sin(angle));
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#ffe7a7';
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function resultPanel() {
+      roundedRect(35, 771, 470, 151, 22, '#38201b', '#996249');
+      label(result.metin, 270, 802, 40, { serif: true, maxWidth: 437 });
+      label(`+${result.puan} ${words.points.toLocaleLowerCase(document.documentElement.lang)}`,
+        270, 842, 24, { color: gold });
+      const measures = [[words.color, result.renk, '#f38c69'], [words.fill, result.doluluk, '#efd08c']];
+      measures.forEach(([name, percent, color], i) => {
+        const x = 55 + 225 * i;
+        label(name, x, 876, 25, { align: 'left' });
+        label(`${percent}%`, x + 205, 876, 25, { align: 'right', color });
+        roundedRect(x, 898, 205, 9, 4, '#694139');
+        if (percent) roundedRect(x, 898, 205 * percent / 100, 9, 4, color);
+      });
     }
 
     function gameplay(now) {
       hud();
+      if (now - titleStartedAt < RULES.recordingTitleMs) {
+        roundedRect(25, 103, 490, 62, 13, '#f2c687');
+        label(words.orders[order.id][1], 270, 135, 35,
+          { color: '#38201b', weight: 750, maxWidth: 456 });
+      }
       customer(result?.ifade);
       orderBubble(now);
       glass(now);
       if (pour) kettle(now);
-      if (state === 'sonuc') {
+      if (result) {
         if (result.tasti && !reduceMotion) spill(now);
-        roundedRect(46, 806, 448, 99, 22, '#3f231e', '#996249');
-        const color = result.hata ? '#ffd0ac' : cream;
-        label(result.metin, 270, 841, 39, { color, serif: true, maxWidth: 414 });
-        label(`+${result.puan} puan`, 270, 881, 21, { color: gold });
-      } else if (now - glassStartedAt < RULES.orderWaitMs) {
-        label('Sipariş geldi', 270, 872, 35, { serif: true });
+        if (result.kademe === 'perfect' && !reduceMotion) sparkle(now);
+        resultPanel();
       } else {
-        label(stage === 1 ? 'Dem' : 'Sıcak su', 270, 850, 35, { serif: true });
-        label(pour ? (stage === 1 ? 'Suya geçmek için bırak' : 'Servis etmek için bırak')
-          : 'Dökmek için basılı tut', 270, 893, 22, { color: gold, weight: 500 });
+        label(stage === 1 ? words.brew : words.water, 270, 848, 39, { serif: true });
+        label(pour ? words.release : words.hold, 270, 892, 28, { color: gold });
+        if (!pour && ((day === 1 && glassNo === 1) || (day === 1 && glassNo === 2 && stage === 2))) {
+          finger(now);
+        }
       }
-      label('Çay Ocağı', 518, 934, 16, { align: 'right', color: '#dfb992', serif: true });
+      label(words.name, 514, 944, 24, { align: 'right', color: '#ecc7a0', serif: true });
     }
 
     function summary() {
-      label('Gün sonu', 270, 228, 66, { serif: true });
-      roundedRect(46, 306, 448, 158, 22, '#321c1a', '#a06a4a');
-      label('Toplam puan', 160, 352, 21, { color: gold });
-      label(totalScore, 160, 409, 48, { serif: true });
-      label('Mükemmel', 380, 352, 21, { color: gold });
-      label(perfects, 380, 409, 48, { serif: true });
+      label(words.day(day), 270, 128, 31, { color: gold });
+      label(words.end, 270, 203, 66, { serif: true });
+      roundedRect(46, 277, 448, 146, 22, '#321c1a', '#a06a4a');
+      label(words.total, 158, 315, 26, { color: gold });
+      label(totalScore, 158, 371, 48, { serif: true });
+      label(words.perfectCount, 382, 315, 26, { color: gold, maxWidth: 195 });
+      label(perfects, 382, 371, 48, { serif: true });
       ctx.fillStyle = '#a06a4a';
-      ctx.fillRect(269, 335, 1, 100);
-      const note = clips.length ? `Kayıt biçimi: ${recordingFormat()}`
-        : recordingType ? 'Bu gün kesit kaydedilemedi'
-          : 'Bu tarayıcı kesit kaydını desteklemiyor';
-      label(note, 270, 831, 19, { color: gold, maxWidth: 460 });
-      if (clipCode !== null) {
-        label(`Kesit kodu: ${clipCode}`, 270, 873, 18, { color: '#e0b99c', maxWidth: 460 });
-      }
+      ctx.fillRect(269, 297, 1, 106);
+      const note = !session.ready ? '' : session.clips.length ? words.format(recordingFormat())
+        : recordingType ? words.noClips : words.unsupported;
+      if (note) label(note, 270, 848, 25, { color: gold, maxWidth: 470 });
+      if (clipCode !== null) label(words.code(clipCode), 270, 889, 24, { color: cream, maxWidth: 470 });
     }
 
     function draw(now) {
       backdrop();
-      if (state === 'baslangic') front(now);
+      if (state === 'baslangic' || state === 'loading') front();
+      else if (state === 'help') help();
       else if (state === 'gunSonu') summary();
       else gameplay(now);
+      if (pausedFrom) {
+        ctx.fillStyle = '#211213d9';
+        ctx.fillRect(0, 0, RULES.width, RULES.height);
+        roundedRect(26, 242, 488, 487, 26, '#38201b', '#a77353');
+        label(words.paused, 270, 322, 56, { serif: true, maxWidth: 442 });
+      }
       drawButtons();
+    }
+
+    const soundEnabled = () => soundOn && !sdkMuted && !adPlaying;
+
+    function applyAudioSettings() {
+      if (audio) {
+        const at = audio.context.currentTime;
+        audio.master.gain.setTargetAtTime(soundEnabled() ? 0.64 : 0, at, 0.009);
+      }
+      for (const { button } of buttons) {
+        if (button.hasAttribute('aria-pressed')) {
+          button.textContent = soundEnabled() ? words.soundOn : words.soundOff;
+          button.setAttribute('aria-pressed', String(soundEnabled()));
+        }
+      }
     }
 
     function unlockAudio() {
@@ -512,59 +757,200 @@
           if (!AudioEngine) return;
           const context = new AudioEngine();
           const master = context.createGain();
-          master.gain.value = soundOn ? 0.5 : 0;
-          master.connect(context.destination);
-          const noise = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
-          const samples = noise.getChannelData(0);
-          for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
-          audio = { context, master, noise, stream: null };
+          const compressor = context.createDynamicsCompressor();
+          compressor.threshold.value = -16;
+          compressor.ratio.value = 4;
+          master.gain.value = soundEnabled() ? 0.64 : 0;
+          master.connect(compressor).connect(context.destination);
+          const duration = context.sampleRate * 2;
+          const brown = context.createBuffer(1, duration, context.sampleRate);
+          const white = context.createBuffer(1, duration, context.sampleRate);
+          const brownSamples = brown.getChannelData(0);
+          const whiteSamples = white.getChannelData(0);
+          let integrated = 0;
+          for (let i = 0; i < duration; i++) {
+            whiteSamples[i] = Math.random() * 2 - 1;
+            integrated = 0.985 * integrated + 0.025 * whiteSamples[i];
+            brownSamples[i] = integrated * 2.8;
+          }
+          const seam = integrated * 2.8;
+          for (let i = 0; i < duration; i++) brownSamples[i] -= seam * i / (duration - 1);
+          audio = { context, master, brown, white, flow: null };
         }
         if (audio.context.state !== 'running') audio.context.resume().catch(() => {});
       } catch {
-        // Oyun ses aygıtı olmadan da devam eder.
+        // Ses aygıtı kullanılamadığında oyun devam eder.
       }
+    }
+
+    function tone(output, at, frequency, glide, amplitude, duration) {
+      const { context } = audio;
+      const source = context.createOscillator();
+      const volume = context.createGain();
+      source.frequency.setValueAtTime(frequency, at);
+      source.frequency.exponentialRampToValueAtTime(frequency * glide, at + duration * 0.53);
+      volume.gain.setValueAtTime(0, at);
+      volume.gain.linearRampToValueAtTime(amplitude, at + 0.002);
+      volume.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+      volume.gain.linearRampToValueAtTime(0, at + duration + 0.003);
+      source.connect(volume).connect(output);
+      source.onended = () => { source.disconnect(); volume.disconnect(); };
+      source.start(at);
+      source.stop(at + duration + 0.004);
+    }
+
+    function bubble(output, at, brew) {
+      const frequency = brew ? 940 + 2060 * Math.random() ** 1.3 : 500 + 2300 * Math.random() ** 1.8;
+      tone(output, at, frequency, 1.10 + Math.random() * 0.20, 0.018 + Math.random() * 0.052,
+        0.014 + Math.random() * 0.026);
+    }
+
+    function cavityFrequency() {
+      // Çeyrek dalga yaklaşımı. Ağız etkisi için en kısa boşluk sınırlandırılır.
+      return 300 / Math.max(0.2, 1 - level * 0.8);
     }
 
     function startPourSound() {
       if (!audio) return;
-      const source = audio.context.createBufferSource();
-      const filter = audio.context.createBiquadFilter();
-      const volume = audio.context.createGain();
-      source.buffer = audio.noise;
+      const { context, master } = audio;
+      const at = context.currentTime;
+      const source = context.createBufferSource();
+      const filter = context.createBiquadFilter();
+      const air = context.createGain();
+      const volume = context.createGain();
+      const brew = stage === 1;
+      const rate = brew ? 38 : 76;
+      source.buffer = audio.brown;
       source.loop = true;
       filter.type = 'bandpass';
-      filter.frequency.value = stage === 1 ? 680 : 1070;
-      filter.Q.value = 0.7;
-      volume.gain.value = 0.31;
-      source.connect(filter).connect(volume).connect(audio.master);
-      source.onended = () => { source.disconnect(); filter.disconnect(); volume.disconnect(); };
-      source.start();
-      audio.stream = source;
+      filter.frequency.value = cavityFrequency();
+      filter.Q.value = 1.7;
+      air.gain.value = brew ? 0.20 : 0.29;
+      volume.gain.setValueAtTime(0, at);
+      volume.gain.linearRampToValueAtTime(1, at + 0.043);
+      source.connect(filter).connect(air).connect(volume).connect(master);
+      source.onended = () => { source.disconnect(); filter.disconnect(); air.disconnect(); volume.disconnect(); };
+      source.start(at, Math.random());
+      let next = at;
+      const schedule = () => {
+        if (context.state !== 'running') return;
+        const current = context.currentTime;
+        next = Math.max(next, current);
+        while (next < current + 0.075) {
+          next += -Math.log(1 - Math.random()) / rate;
+          bubble(volume, next, brew);
+        }
+      };
+      audio.flow = { source, filter, volume, timer: setInterval(schedule, 28) };
+      schedule();
     }
 
     function stopPourSound() {
-      if (!audio?.stream) return;
-      audio.stream.stop();
-      audio.stream = null;
+      if (!audio?.flow) return;
+      const { source, volume, timer } = audio.flow;
+      const at = audio.context.currentTime;
+      clearInterval(timer);
+      if (volume.gain.cancelAndHoldAtTime) volume.gain.cancelAndHoldAtTime(at);
+      else {
+        const gain = volume.gain.value;
+        volume.gain.cancelScheduledValues(at);
+        volume.gain.setValueAtTime(gain, at);
+      }
+      volume.gain.linearRampToValueAtTime(0, at + 0.055);
+      source.stop(at + 0.058);
+      audio.flow = null;
     }
 
-    function chime(overflow) {
+    function serveSound(tier) {
       if (!audio) return;
       const { context, master } = audio;
       const at = context.currentTime;
-      const oscillator = context.createOscillator();
-      const envelope = context.createGain();
-      oscillator.type = overflow ? 'triangle' : 'sine';
-      oscillator.frequency.setValueAtTime(overflow ? 165 : 1320, at);
-      oscillator.frequency.exponentialRampToValueAtTime(overflow ? 65 : 1080, at + 0.23);
-      envelope.gain.setValueAtTime(0.001, at);
-      envelope.gain.exponentialRampToValueAtTime(overflow ? 0.29 : 0.19, at + 0.018);
-      envelope.gain.exponentialRampToValueAtTime(0.001, at + 0.31);
-      oscillator.connect(envelope).connect(master);
-      oscillator.onended = () => { oscillator.disconnect(); envelope.disconnect(); };
-      oscillator.start(at);
-      oscillator.stop(at + 0.32);
+      if (tier === 'spilled') {
+        const source = context.createBufferSource();
+        const gain = context.createGain();
+        source.buffer = audio.white;
+        gain.gain.setValueAtTime(0, at);
+        gain.gain.linearRampToValueAtTime(0.24, at + 0.009);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.11);
+        source.connect(gain).connect(master);
+        source.onended = () => { source.disconnect(); gain.disconnect(); };
+        source.start(at, Math.random(), 0.115);
+        for (let i = 0; i < 7; i++) bubble(master, at + Math.random() * 0.135, false);
+        for (const delay of [0.14, 0.23, 0.36]) {
+          tone(master, at + delay, 680 + Math.random() * 310, 1.24, 0.048, 0.052);
+          tone(master, at + delay, 290, 1, 0.025, 0.027);
+        }
+        return;
+      }
+      if (tier === 'late') return;
+      tone(master, at, 265, 0.86, 0.16, 0.035);
+      tone(master, at, 630, 0.92, 0.075, 0.024);
+      if (tier === 'perfect') {
+        const partials = [[2410, 0.088], [3910, 0.054], [5620, 0.035], [7320, 0.018]];
+        for (const [delay, strength] of [[0.08, 1], [0.174, 0.63]]) {
+          partials.forEach(([frequency, amplitude], i) =>
+            tone(master, at + delay, frequency, 1, amplitude * strength, 0.13 - i * 0.018));
+        }
+      }
     }
+
+    // Platform erişimi bu sarmalayıcıda kalır.
+    const cg = {
+      sdk: null,
+      active: false,
+      environment: 'unavailable',
+      async init() {
+        const sdk = window.CrazyGames?.SDK;
+        if (!sdk) return;
+        try {
+          // Bazı SDK sürümleri ortam bilgisini yalnız init sonrasında açar.
+          let knownEnvironment;
+          try { knownEnvironment = sdk.environment; } catch { /* init gerekli */ }
+          if (knownEnvironment === 'disabled') {
+            this.environment = knownEnvironment;
+            return;
+          }
+          await sdk.init();
+          this.environment = sdk.environment;
+          if (this.environment === 'local' || this.environment === 'crazygames') this.sdk = sdk;
+        } catch {
+          // Çevrimdışı ve bağımsız oynanış.
+        }
+      },
+      call(operation) {
+        if (!this.sdk) return;
+        try { return operation(this.sdk); } catch { return undefined; }
+      },
+      loadingStart() { this.call(sdk => sdk.game.loadingStart()); },
+      loadingStop() { this.call(sdk => sdk.game.loadingStop()); },
+      gameplayStart() {
+        if (this.active) return;
+        this.active = true;
+        this.call(sdk => sdk.game.gameplayStart());
+      },
+      gameplayStop() {
+        if (!this.active) return;
+        this.active = false;
+        this.call(sdk => sdk.game.gameplayStop());
+      },
+      settings(listener) {
+        this.call(sdk => listener(sdk.game.settings));
+        this.call(sdk => sdk.game.addSettingsChangeListener(listener));
+      },
+      systemInfo() { return this.call(sdk => sdk.user.systemInfo); },
+      happytime() { this.call(sdk => sdk.game.happytime()); },
+      midgame(started, done) {
+        if (!this.sdk) { done(); return; }
+        try {
+          const request = this.sdk.ad.requestAd('midgame', {
+            adStarted: started, adFinished: done, adError: done
+          });
+          request?.catch?.(done);
+        } catch {
+          done();
+        }
+      }
+    };
 
     function recordingFormat(type = recordingType) {
       return type.split(';')[0].split('/')[1] || '';
@@ -574,48 +960,55 @@
       recordingType = '';
       if (!canvas.captureStream || typeof window.MediaRecorder?.isTypeSupported !== 'function') return;
       recordingType = RULES.recordingTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
-      if (!recordingType) return;
-      try {
-        recordingStream = canvas.captureStream(RULES.framesPerSecond);
-      } catch {
-        recordingType = '';
-      }
     }
 
     function recordGlass() {
-      if (!recordingStream) return;
+      if (!recordingType) return;
+      const owner = session;
+      const cup = glassNo;
+      const id = `${owner.day}:${cup}`;
+      let stream;
       try {
-        const recorder = new MediaRecorder(recordingStream, { mimeType: recordingType });
+        stream = canvas.captureStream(RULES.framesPerSecond);
+        const recorder = new MediaRecorder(stream, { mimeType: recordingType });
         const clip = { recorder, result: null };
         const chunks = [];
-        let failed = false;
-        const finished = new Promise(resolve => {
-          recorder.addEventListener('dataavailable', e => {
-            if (e.data.size) chunks.push(e.data);
-          });
-          recorder.addEventListener('error', () => { failed = true; resolve(); }, { once: true });
-          recorder.addEventListener('stop', () => {
-            if (!failed && chunks.length && clip.result) {
-              const type = chunks[0].type || recorder.mimeType || recordingType;
-              clips.push({ ...clip.result, blob: new Blob(chunks, { type }), format: recordingFormat(type) });
-            }
-            resolve();
-          }, { once: true });
+        let settle;
+        const finished = new Promise(resolve => { settle = resolve; });
+        let closed = false;
+        const close = save => {
+          if (closed) return;
+          closed = true;
+          stream.getTracks().forEach(track => track.stop());
+          if (recording === clip) recording = null;
+          if (save && owner === session && clip.result && chunks.length) {
+            const type = chunks[0].type || recorder.mimeType;
+            owner.clips.push({ ...clip.result, id, blob: new Blob(chunks, { type }), format: recordingFormat(type) });
+          }
+          settle();
+        };
+        recorder.addEventListener('dataavailable', e => {
+          if (e.data.size) chunks.push(e.data);
         });
+        recorder.addEventListener('error', () => close(false), { once: true });
+        recorder.addEventListener('stop', () => close(true), { once: true });
+        clip.close = close;
         recorder.start();
         recording = clip;
-        pendingClips.push(finished);
+        owner.pending.push(finished);
       } catch {
-        // Kayıt başlatılamazsa bardak oynanmaya devam eder.
+        stream?.getTracks().forEach(track => track.stop());
       }
     }
 
-    function stopRecording() {
+    function stopRecording(keepResult) {
       if (!recording) return;
-      const { recorder } = recording;
-      recording.result = result;
+      const clip = recording;
       recording = null;
-      if (recorder.state !== 'inactive') recorder.stop();
+      clip.result = keepResult ? result : null;
+      if (clip.recorder.state !== 'inactive') {
+        try { clip.recorder.stop(); } catch { clip.close(false); }
+      }
     }
 
     function download(clip, name) {
@@ -629,220 +1022,424 @@
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     }
 
+    function seededRandom(seed) {
+      return () => {
+        seed = (Math.imul(1664525, seed) + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+    }
+
+    function planDay() {
+      const random = seededRandom(Math.imul(day, 0x9e3779b1));
+      const unlocked = ['light', 'ruby', 'strong', 'mug'];
+      if (day >= 2) unlocked.push('hurry');
+      if (day >= 3) unlocked.push('brim');
+      const opening = day === 1 ? ['brew', 'light', 'ruby', 'mug', 'strong']
+        : day === 2 ? ['ruby', 'hurry'] : ['light', 'brim', 'hurry', 'mug'];
+      dayOrders = Array.from({ length: RULES.glassLimit }, (_, i) => {
+        const id = opening[i] ?? unlocked[Math.floor(random() * unlocked.length)];
+        return RULES.orders.find(orderType => orderType.id === id);
+      });
+      dayCustomers = [];
+      while (dayCustomers.length < RULES.glassLimit) {
+        const group = customers.map((_, i) => i);
+        for (let i = group.length - 1; i > 0; i--) {
+          const other = Math.floor(random() * (i + 1));
+          [group[i], group[other]] = [group[other], group[i]];
+        }
+        if (group[0] === dayCustomers.at(-1)) [group[0], group[1]] = [group[1], group[0]];
+        dayCustomers.push(...group);
+      }
+    }
+
+    function soundButton(y) {
+      const button = registerButton(words.soundOn, y, () => {
+        soundOn = !soundOn;
+        applyAudioSettings();
+      }, { secondary: true });
+      button.setAttribute('aria-pressed', String(soundEnabled()));
+      applyAudioSettings();
+    }
+
+    function showMainMenu() {
+      cancelPour();
+      session = null;
+      stopRecording(false);
+      cg.gameplayStop();
+      pausedFrom = null;
+      pausedMs = 0;
+      day = 0;
+      glassNo = 0;
+      order = RULES.orders[0];
+      result = null;
+      state = 'baslangic';
+      status.textContent = words.name;
+      clearButtons();
+      registerButton(words.start, 613, startDay);
+      registerButton(words.help, 710, showHelp, { secondary: true });
+      soundButton(807);
+    }
+
+    function showHelp() {
+      state = 'help';
+      status.textContent = words.guide.join(' ');
+      clearButtons();
+      registerButton(words.start, 628, startDay);
+      registerButton(words.back, 725, showMainMenu, { secondary: true });
+    }
+
+    function showGameControls() {
+      clearButtons();
+      registerButton(words.pause, 22, pauseGame, { x: 24, w: 56, h: 66, secondary: true, icon: true });
+    }
+
+    function pauseGame() {
+      if (state !== 'oyun' && state !== 'sonuc') return;
+      const now = clock();
+      if (pour) {
+        advancePour(now);
+        cancelPour();
+      }
+      pausedAt = now + pausedMs;
+      pausedFrom = state;
+      state = 'duraklat';
+      if (recording?.recorder.state === 'recording') recording.recorder.pause();
+      cg.gameplayStop();
+      status.textContent = words.paused;
+      clearButtons();
+      registerButton(words.resume, 380, resumeGame);
+      soundButton(480);
+      registerButton(words.menu, 580, showMainMenu, { secondary: true });
+    }
+
+    function resumeGame() {
+      if (!pausedFrom) return;
+      pausedMs += performance.now() - pausedAt;
+      state = pausedFrom;
+      pausedFrom = null;
+      showGameControls();
+      cg.gameplayStart();
+    }
+
     function startDay() {
-      unlockAudio();
-      clips.length = 0;
-      pendingClips = [];
+      if (!session) seenOrders.clear();
+      session = { day: ++day, clips: [], pending: [], ready: false };
       glassNo = 0;
       mistakes = 0;
       totalScore = 0;
       perfects = 0;
       lastResult = null;
-      clearButtons();
-      resizeBackingCanvas();
+      pausedMs = 0;
       prepareRecording();
-      nextGlass(performance.now());
+      planDay();
+      showGameControls();
+      nextGlass(clock());
+      cg.gameplayStart();
     }
 
     function nextGlass(now) {
       state = 'oyun';
       glassStartedAt = now;
+      titleStartedAt = now;
+      firstPour = false;
       glassNo++;
-      order = RULES.orders[(glassNo - 1) % RULES.orders.length];
+      order = dayOrders[glassNo - 1];
+      customerIndex = dayCustomers[tutorial() ? 0 : glassNo - 1];
+      firstOrder = !seenOrders.has(order.id);
+      seenOrders.add(order.id);
       stage = 1;
       tea = 0;
       water = 0;
       level = 0;
       result = null;
-      status.textContent = `Bardak ${glassNo}. ${order.text}. Dem dök.`;
-      draw(now);
-      recordGlass();
+      cupFrames = 0;
+      status.textContent = `${words.day(day)}. ${words.glass} ${glassNo}. ${orderText()}.`;
     }
 
-    async function endDay() {
-      await Promise.all(pendingClips);
-      recordingStream?.getTracks().forEach(track => track.stop());
-      recordingStream = null;
-      state = 'gunSonu';
-      status.textContent = `Gün sonu. Toplam puan ${totalScore}. Mükemmel bardak ${perfects}.`;
-      registerButton('Yeniden oyna', 496, startDay);
-      if (clips.length) {
-        const ordered = [...clips].sort((a, b) => a.bardak - b.bardak);
+    function showSummaryControls() {
+      clearButtons();
+      registerButton(words.replay, 456, replay);
+      if (session.clips.length && session.ready) {
+        const regularClips = session.clips.filter(clip => clip.gun !== 1 || clip.bardak > 3);
+        const eligibleClips = regularClips.length ? regularClips : session.clips;
+        const ordered = [...eligibleClips].sort((a, b) => a.bardak - b.bardak);
         const best = ordered.reduce((a, b) => b.puan > a.puan ? b : a);
         const worst = ordered.find(clip => clip.tasti) || ordered.reduce((a, b) => b.puan < a.puan ? b : a);
-        registerButton('En iyi bardağı indir', 602, () => download(best, 'iyi'), true);
-        registerButton('En kötü bardağı indir', 707, () => download(worst, 'kotu'), true);
+        registerButton(words.best, 550, () => download(best, 'iyi'), { secondary: true });
+        registerButton(words.worst, 644, () => download(worst, 'kotu'), { secondary: true });
       }
+      registerButton(words.menu, 738, showMainMenu, { secondary: true });
     }
 
-    function beginPour(input, now, until = Infinity) {
+    function endDay() {
+      const owner = session;
+      state = 'gunSonu';
+      cg.gameplayStop();
+      if (mistakes === 0 && perfects >= RULES.happytimePerfects) cg.happytime();
+      status.textContent = `${words.end}. ${words.total} ${totalScore}. ${words.perfectCount} ${perfects}.`;
+      showSummaryControls();
+      Promise.all(owner.pending).then(() => {
+        if (session !== owner || state !== 'gunSonu') return;
+        owner.ready = true;
+        showSummaryControls();
+        if (adPending) buttons.forEach(({ button }) => { button.disabled = true; });
+      });
+    }
+
+    function replay() {
+      if (adPending || state !== 'gunSonu') return;
+      adPending = true;
+      let finished = false;
+      buttons.forEach(({ button }) => { button.disabled = true; });
+      draw(clock());
+      const started = () => {
+        if (finished) return;
+        adPlaying = true;
+        applyAudioSettings();
+      };
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        adPlaying = false;
+        adPending = false;
+        applyAudioSettings();
+        startDay();
+      };
+      cg.midgame(started, done);
+    }
+
+    function beginPour(input, now, until = Infinity, resolved = null) {
       if (state !== 'oyun' || pour || now - glassStartedAt < RULES.orderWaitMs) return false;
-      pour = { input, time: now, until };
+      advancePour(now);
+      if (state !== 'oyun') return false;
+      if (!firstPour) {
+        firstPour = true;
+        if (now - glassStartedAt > RULES.recordingTitleMs) {
+          stopRecording(false);
+          titleStartedAt = now;
+          cupFrames = 0;
+        }
+      }
+      const speed = (1 + RULES.speedIncrease) ** (glassNo - 1) * (order.fillScale ?? 1) / RULES.fillSeconds;
+      pour = { input, started: now, until, resolved, speed, baseTea: tea, baseWater: water };
       startPourSound();
       return true;
     }
 
-    function addLiquid(now) {
-      if (!pour) return;
-      const speed = (1 + RULES.speedIncrease) ** (glassNo - 1) / RULES.fillSeconds;
-      const end = Math.max(pour.time, Math.min(now, pour.until));
-      const amount = speed * (end - pour.time) / 1000;
-      pour.time = end;
-      if (stage === 1) tea += amount;
-      else water += amount;
-      level = tea + water;
-      if (level - 1 > Number.EPSILON * 16) {
-        const overflowRatio = tea / level;
-        tea = overflowRatio;
-        water = 1 - overflowRatio;
-        level = 1;
-        finishGlass(now, true);
+    function cancelPour() {
+      const active = pour;
+      pour = null;
+      stopPourSound();
+      active?.resolved?.();
+    }
+
+    function advancePour(now) {
+      if (state !== 'oyun') return;
+      const deadline = order.deadlineMs ? glassStartedAt + RULES.orderWaitMs + order.deadlineMs : Infinity;
+      if (pour) {
+        const { started, until, speed, baseTea, baseWater } = pour;
+        const end = Math.max(started, Math.min(now, until, deadline));
+        const capacity = Math.max(0, 1 - baseTea - baseWater);
+        const volume = speed * (end - started) / 1000;
+        const amount = Math.min(volume, capacity);
+        tea = baseTea + (stage === 1 ? amount : 0);
+        water = baseWater + (stage === 2 ? amount : 0);
+        level = tea + water;
+        if (volume > capacity + 1e-10) {
+          finishGlass(started + capacity * 1000 / speed, 'spilled');
+          return;
+        }
+        if (audio?.flow) {
+          audio.flow.filter.frequency.setTargetAtTime(cavityFrequency(), audio.context.currentTime, 0.028);
+        }
+        if (pour.until <= now && pour.until < deadline) {
+          completePour(pour.until);
+          return;
+        }
+      }
+      if (now >= deadline) finishGlass(deadline, 'late');
+    }
+
+    function completePour(now) {
+      cancelPour();
+      if (!level) return;
+      if (stage === 1 && order.id !== 'brew') {
+        stage = 2;
+        status.textContent = words.water;
+      } else {
+        finishGlass(now);
       }
     }
 
     function releasePour(input, now, serve = true) {
       if (pour?.input !== input) return;
-      addLiquid(now);
-      if (!pour) return;
-      pour = null;
-      stopPourSound();
-      if (!serve) return;
-      if (stage === 1) {
-        if (tea > 0) {
-          stage = 2;
-          status.textContent = 'Sıcak su dök.';
-        }
-      } else {
-        finishGlass(now, false);
-      }
+      advancePour(now);
+      if (pour?.input !== input) return;
+      if (serve) completePour(now);
+      else cancelPour();
     }
 
-    function finishGlass(now, overflow) {
-      stopPourSound();
-      pour = null;
+    function finishGlass(now, failure) {
+      cancelPour();
       const ratio = level ? tea / level : 0;
-      const r = Math.max(0, 1 - Math.abs(ratio - order.ratio) / RULES.ratioTolerance);
-      const l = Math.max(0, 1 - Math.abs(level - RULES.targetLevel) / RULES.levelTolerance);
-      const score = overflow ? 0 : Math.round(100 * (RULES.ratioWeight * r + (1 - RULES.ratioWeight) * l));
-      const perfect = score >= RULES.perfectScore;
-      const fail = score < RULES.passScore;
-      const text = overflow ? 'Taştı!' : perfect ? 'Eline sağlık!' : fail ? 'Bu çay mı?' : 'İdare eder.';
+      const color = clamp(1 - Math.abs(ratio - targetRatio()) / RULES.ratioTolerance);
+      const fill = clamp(1 - Math.abs(level - targetLevel()) / RULES.levelTolerance);
+      const score = failure ? 0 : Math.round(100 * (RULES.ratioWeight * color + (1 - RULES.ratioWeight) * fill));
+      const { perfect, veryGood, good } = RULES.scoreTiers;
+      const tier = failure || (score >= perfect ? 'perfect'
+        : score >= veryGood ? 'veryGood' : score >= good ? 'good' : 'bad');
+      const failed = Boolean(failure) || tier === 'bad';
       result = {
-        metin: text, puan: score, tasti: overflow, hata: fail, bardak: glassNo,
-        ifade: perfect ? 'mutlu' : fail ? 'saskin' : 'bekliyor'
+        metin: words[tier], puan: score, tasti: failure === 'spilled',
+        hata: failed && !tutorial(), bardak: glassNo, gun: day, kademe: tier,
+        renk: Math.round(100 * color), doluluk: Math.round(100 * fill),
+        ifade: tier === 'perfect' ? 'mutlu' : failed ? 'saskin' : 'bekliyor'
       };
       lastResult = result;
-      if (perfect) perfects++;
-      if (fail) mistakes++;
+      if (tier === 'perfect') perfects++;
+      if (result.hata) mistakes++;
       totalScore += score;
-      if (overflow || perfect) chime(overflow);
-      if (overflow) {
+      serveSound(tier);
+      if (result.tasti) {
         droplets = Array.from({ length: 22 }, () => ({
-          dx: (Math.random() - 0.5) * 465,
-          dy: -40 - Math.random() * 245,
-          size: 2 + Math.random() * 4.5
+          dx: (Math.random() - 0.5) * 420, dy: -40 - Math.random() * 220, size: 2 + Math.random() * 4.5
         }));
       }
       state = 'sonuc';
       resultAt = now;
-      status.textContent = `${text} ${score} puan.`;
+      status.textContent = `${result.metin} ${score} ${words.points}. ${words.color} ${result.renk}%. ${words.fill} ${result.doluluk}%.`;
     }
 
-    let endingDay = false;
-    function frame(now) {
-      if (state === 'oyun') addLiquid(now);
-      else if (state === 'sonuc') {
-        const elapsed = now - resultAt;
-        if (elapsed >= RULES.recordedResultMs) stopRecording();
-        if (elapsed >= RULES.resultMs && !endingDay) {
-          if (glassNo >= RULES.glassLimit || mistakes >= RULES.mistakeLimit) {
-            endingDay = true;
-            endDay().finally(() => { endingDay = false; });
-          } else {
-            nextGlass(now);
-          }
-        }
+    function frame() {
+      requestAnimationFrame(frame);
+      if (adPlaying) return;
+      const now = clock();
+      if (state === 'oyun') advancePour(now);
+      if (state === 'sonuc' && now - resultAt >= RULES.resultMs &&
+          now - titleStartedAt >= RULES.recordingTitleMs) {
+        stopRecording(true);
+        if (glassNo >= RULES.glassLimit || mistakes >= RULES.mistakeLimit) endDay();
+        else nextGlass(now);
       }
       draw(now);
-      requestAnimationFrame(frame);
+      if ((state === 'oyun' || state === 'sonuc') && cupFrames < 2 && ++cupFrames === 2) {
+        // Kayıt, yeni bardak tuvalde bir tam kare göründükten sonra başlar.
+        recordGlass();
+      }
+      if (!pausedFrom && recording) {
+        const { recorder } = recording;
+        // Keep the opening and the result, but skip long idle gaps between pours.
+        const idle = state === 'oyun' && !pour && now - titleStartedAt >= RULES.recordingTitleMs;
+        if (idle && recorder.state === 'recording') recorder.pause();
+        if (!idle && recorder.state === 'paused') recorder.resume();
+      }
     }
 
     canvas.addEventListener('pointerdown', e => {
       if (e.button !== 0 || state !== 'oyun') return;
       e.preventDefault();
       unlockAudio();
-      if (beginPour(e.pointerId, performance.now())) canvas.setPointerCapture(e.pointerId);
+      if (beginPour(e.pointerId, clock())) canvas.setPointerCapture(e.pointerId);
     });
-    canvas.addEventListener('pointerup', e => releasePour(e.pointerId, performance.now()));
+    canvas.addEventListener('pointerup', e => releasePour(e.pointerId, clock()));
     for (const event of ['pointercancel', 'lostpointercapture']) {
-      canvas.addEventListener(event, e => releasePour(e.pointerId, performance.now(), false));
+      canvas.addEventListener(event, e => releasePour(e.pointerId, clock(), false));
     }
     window.addEventListener('keydown', e => {
-      if (e.code !== 'Space' || state !== 'oyun') return;
+      if (e.code === 'Escape') {
+        if (pausedFrom) resumeGame();
+        else if (state === 'oyun' || state === 'sonuc') pauseGame();
+        else if (!adPending && (state === 'gunSonu' || state === 'help')) showMainMenu();
+      }
+      if (e.code !== 'Space' || state !== 'oyun' || (e.target instanceof HTMLButtonElement && e.target.matches(':focus-visible'))) return;
       e.preventDefault();
       if (e.repeat) return;
       unlockAudio();
-      beginPour('space', performance.now());
+      beginPour('space', clock());
     });
     window.addEventListener('keyup', e => {
       if (e.code === 'Space' && pour?.input === 'space') {
         e.preventDefault();
-        releasePour('space', performance.now());
+        releasePour('space', clock());
       }
     });
     window.addEventListener('blur', () => {
-      if (pour) releasePour(pour.input, performance.now(), false);
+      if (pour) releasePour(pour.input, clock(), false);
     });
-    window.addEventListener('resize', () => {
-      if (state === 'baslangic' || state === 'gunSonu') resizeBackingCanvas();
-    });
+    window.addEventListener('touchend', unlockAudio, { passive: true });
+    window.addEventListener('click', unlockAudio);
 
     if (query.get('test') === '1') {
       window.__cay = {
         get state() { return state; },
+        get gun() { return day; },
         get bardak() { return glassNo; },
         get hata() { return mistakes; },
         get puan() { return totalScore; },
         get sonSonuc() { return lastResult && { ...lastResult }; },
+        get siparis() {
+          return glassNo ? { tur: order.id, cay: order.tea, metin: orderText() } : null;
+        },
+        get sdkOrtami() { return cg.environment; },
         get kayitBicimi() { return recordingFormat(); },
-        get kesitSayisi() { return clips.length; },
+        get kesitSayisi() { return session?.clips.length ?? 0; },
+        get kesitler() {
+          return session?.clips.map(({ id, bardak, puan, format, blob }) =>
+            ({ id, bardak, puan, format, bayt: blob.size })) ?? [];
+        },
         async otomatik(demMs, suMs) {
           if (![demMs, suMs].every(ms => Number.isFinite(ms) && ms >= 0)) return false;
           if (state !== 'oyun' || pour) return false;
-          const currentGlass = glassNo;
-          const readyAt = glassStartedAt + RULES.orderWaitMs;
-          while (performance.now() < readyAt) {
-            await new Promise(resolve => setTimeout(resolve, Math.ceil(readyAt - performance.now())));
-          }
-          if (state !== 'oyun' || glassNo !== currentGlass || pour) return false;
+          const owner = session;
+          const cup = glassNo;
+          const current = () => session === owner && glassNo === cup && state === 'oyun' && !pour;
+          const wait = glassStartedAt + RULES.orderWaitMs - clock();
+          if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait + 1));
+          if (!current()) return false;
           const input = Symbol();
-          const hold = async ms => {
-            const now = performance.now();
-            if (!beginPour(input, now, now + ms)) return;
-            await new Promise(resolve => setTimeout(resolve, ms));
-            releasePour(input, performance.now());
-          };
+          const hold = ms => new Promise(resolve => {
+            const now = clock();
+            if (!beginPour(input, now, now + ms, resolve)) resolve();
+          });
           if (stage === 1) {
-            if (demMs === 0 && tea === 0) return false;
+            if (!demMs && !tea) return false;
             await hold(demMs);
           }
-          if (state === 'oyun' && glassNo === currentGlass && stage === 2 && !pour) await hold(suMs);
-          return glassNo === currentGlass && state === 'sonuc';
+          if (current() && stage === 2) await hold(suMs);
+          return session === owner && glassNo === cup && state === 'sonuc';
         }
       };
     }
 
-    registerButton('Başla', 665, startDay);
-    const soundButton = registerButton('Ses açık', 770, () => {
-      soundOn = !soundOn;
-      unlockAudio();
-      if (audio) audio.master.gain.value = soundOn ? 0.5 : 0;
-      soundButton.textContent = soundOn ? 'Ses açık' : 'Ses kapalı';
-      soundButton.setAttribute('aria-pressed', String(soundOn));
-    }, true);
-    soundButton.setAttribute('aria-pressed', 'true');
-    resizeBackingCanvas();
-    requestAnimationFrame(frame);
+    function setLanguage(locale) {
+      const override = query.get('lang');
+      const language = override === 'tr' || override === 'en' ? override
+        : /^tr(?:[-_]|$)/i.test(locale) ? 'tr' : 'en';
+      words = WORDS[language];
+      document.documentElement.lang = language;
+      document.title = words.name;
+      canvas.setAttribute('aria-label', words.area);
+    }
+
+    async function boot() {
+      resizeBackingCanvas();
+      setLanguage(navigator.language);
+      draw(clock());
+      await cg.init();
+      cg.loadingStart();
+      const info = cg.environment === 'crazygames' ? cg.systemInfo() : null;
+      if (info) setLanguage(info.locale || info.countryCode || navigator.language);
+      cg.settings(settings => {
+        sdkMuted = settings?.muteAudio === true;
+        applyAudioSettings();
+      });
+      showMainMenu();
+      draw(clock());
+      cg.loadingStop();
+      requestAnimationFrame(frame);
+    }
+
+    boot();
   </script>
 </body>
 </html>
